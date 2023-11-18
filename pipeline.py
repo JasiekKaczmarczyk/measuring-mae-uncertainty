@@ -1,7 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
-from transformers import AutoImageProcessor, ViTMAEModel
+from transformers import AutoImageProcessor, ViTMAEForPreTraining
 from PIL import Image
 import requests
 
@@ -28,12 +28,21 @@ def main():
     image = Image.open(requests.get(url, stream=True).raw)
 
     image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base")
-    model = ViTMAEModel.from_pretrained("facebook/vit-mae-base")
+    model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
 
     inputs = image_processor(images=image, return_tensors="pt")
     outputs = model(**inputs, output_attentions=True)
 
-    print(outputs.attentions[-1].shape)
+    logits = outputs.logits
+    print(logits.shape)
+
+    pred_img = model.unpatchify(logits)
+
+    plt.imshow(pred_img[0].detach().cpu().permute(1, 2, 0))
+    plt.show()
+
+
+    # print(outputs.attentions[-1].shape)
     # shape ([batch_size, num_heads, seq_len, seq_len], ...)
     # attentions = outputs.attentions
     # attn = attentions[-1][0].detach().cpu()

@@ -1,6 +1,8 @@
 import torch
 import einops
 
+# chyba jednak niepotrzebne bo można to zrobić za pomocą model.patchify() lub model.unpatchify(), ale zostawię na wszelki wypadek
+
 def patchify(imgs: torch.Tensor, patch_size: int = 16):
     """
     imgs: (N, 3, H, W)
