@@ -1,4 +1,3 @@
-import math
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -33,11 +32,13 @@ def main():
 
     inputs = image_processor(images=image, return_tensors="pt")
     outputs = model(**inputs, output_attentions=True)
-    # shape ([batch_size, num_heads, seq_len, seq_len], ...)
-    attentions = outputs.attentions
-    attn = attentions[-1][0].detach().cpu()
 
-    plot_attention_maps(attn)
+    print(outputs.attentions[-1].shape)
+    # shape ([batch_size, num_heads, seq_len, seq_len], ...)
+    # attentions = outputs.attentions
+    # attn = attentions[-1][0].detach().cpu()
+
+    # plot_attention_maps(attn)
 
 if __name__ == "__main__":
     main()
