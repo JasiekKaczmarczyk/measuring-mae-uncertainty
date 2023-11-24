@@ -14,14 +14,6 @@ from tqdm import tqdm
 from dataset import MAEDataset
 from metrics import mae_loss, shannon_entropy, gini_index, attention_spread
 
-# policzyć entropię Shannona: output shape [batch_size, seq_len]
-# policzyć attention spread: output shape [batch_size, seq_len]
-# policzyć loss: output_shape [batch_size, seq_len]
-# dataloader, huggingface datasets
-# wizualizacje
-# wandb
-# r^2, korelacja między loss a naszą metryką
-
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
         os.makedirs(dir)
@@ -120,26 +112,40 @@ def main(cfg: OmegaConf):
 
             latent = outputs.last_hidden_state
             ids_restore = outputs.ids_restore
-            mask = outputs.mask.to(torch.long)
+            mask = outputs.mask.cpu()
+            mask_bool = mask.to(torch.bool)
 
             decoder_outputs = model.decoder(latent, ids_restore, output_attentions=True)
             logits = decoder_outputs.logits
+
             # get last attention map
             last_attn_map = decoder_outputs.attentions[-1].detach()
             last_attn_map = remove_cls_token(last_attn_map)
 
             # metrics
             patched_img = model.patchify(pixel_values)
-            loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False)[mask].detach().cpu()
+            loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach().cpu()
 
-            entropy = shannon_entropy(last_attn_map)[mask].cpu()
-            gini = gini_index(last_attn_map)[mask].cpu()
-            attn_spread = attention_spread(last_attn_map)[mask].cpu()
+
+            entropy = shannon_entropy(last_attn_map).cpu()
+            gini = gini_index(last_attn_map).cpu()
+            attn_spread = attention_spread(last_attn_map).cpu()
 
             # log metrics per patch
-            log_loss_vs_uncertainty_measure(loss, entropy, title="Loss vs Shannon Entropy per patch")
-            log_loss_vs_uncertainty_measure(loss, gini, title="Loss vs Gini Index per patch")
-            log_loss_vs_uncertainty_measure(loss, attn_spread, title="Loss vs Attention Spread per patch")
+            log_loss_vs_uncertainty_measure(loss[mask_bool], entropy[mask_bool], title="Loss vs Shannon Entropy per patch")
+            log_loss_vs_uncertainty_measure(loss[mask_bool], gini[mask_bool], title="Loss vs Gini Index per patch")
+            log_loss_vs_uncertainty_measure(loss[mask_bool], attn_spread[mask_bool], title="Loss vs Attention Spread per patch")
+
+            loss_img = (loss * mask).sum(dim=-1) / mask.sum(dim=-1)
+            entropy_img = (entropy * mask).sum(dim=-1) / mask.sum(dim=-1)
+            gini_img = (gini * mask).sum(dim=-1) / mask.sum(dim=-1)
+            attn_spread_img = (attn_spread * mask).sum(dim=-1) / mask.sum(dim=-1)
+
+            log_loss_vs_uncertainty_measure(loss_img, entropy_img, title="Loss vs Shannon Entropy per image")
+            log_loss_vs_uncertainty_measure(loss_img, gini_img, title="Loss vs Gini Index per image")
+            log_loss_vs_uncertainty_measure(loss_img, attn_spread_img, title="Loss vs Attention Spread per image")
+
+
 
 
 if __name__ == "__main__":
