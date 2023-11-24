@@ -2,7 +2,7 @@ import math
 import torch
 import einops
 
-def mae_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor = None, use_norm_pix_loss: bool = False):
+def mae_loss(pred: torch.Tensor, target: torch.Tensor, use_norm_pix_loss: bool = False):
     if use_norm_pix_loss:
         mean = target.mean(dim=-1, keepdim=True)
         var = target.var(dim=-1, keepdim=True)
@@ -11,10 +11,7 @@ def mae_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor = None
     loss = (pred - target) ** 2
     loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-    if mask is None:
-        return loss
-    else:
-        return loss * mask
+    return loss
 
 def shannon_entropy(attn: torch.Tensor):
     # attn shape: [batch_size, num_heads, seq_len, seq_len]
@@ -24,6 +21,12 @@ def shannon_entropy(attn: torch.Tensor):
     H = -torch.sum(attn * torch.log(attn), dim=-1) / math.log(base)
 
     return torch.mean(H, dim=1)
+
+def gini_index(attn: torch.Tensor):
+    # attn shape: [batch_size, num_heads, seq_len, seq_len]
+    G = 1 - torch.sum(attn ** 2, dim=-1)
+
+    return torch.mean(G, dim=1)
 
 def batch_cov(attn: torch.Tensor):
     # shape: [batch_size, num_heads, query_len, key_len]
@@ -45,7 +48,8 @@ def batch_cov(attn: torch.Tensor):
 def attention_spread(attn: torch.Tensor):
     # max_abs_value = torch.abs(torch.amax(attn, dim=-1, keepdim=True))
     # attn = attn / max_abs_value
-    attn = torch.log(attn)
+    # attn = torch.log(attn)
+    attn = (attn - torch.mean(attn, dim=-1, keepdim=True)) / torch.std(attn, dim=-1, keepdim=True)
 
     # shapes: [batch_size, num_heads, seq_len, seq_len] -> [batch_size, seq_len, num_heads, num_heads]
     bcov = batch_cov(attn)
