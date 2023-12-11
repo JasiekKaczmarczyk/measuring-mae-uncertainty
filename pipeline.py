@@ -93,6 +93,7 @@ def main(cfg: OmegaConf):
 
     image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base")
     model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").to(cfg.parameters.device)
+    model.train()
 
     _, val_dataloader = preprocess_dataset(
         "cifar10",
@@ -126,7 +127,6 @@ def main(cfg: OmegaConf):
             patched_img = model.patchify(pixel_values)
             loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach().cpu()
 
-
             entropy = shannon_entropy(last_attn_map).cpu()
             gini = gini_index(last_attn_map).cpu()
             attn_spread = attention_spread(last_attn_map).cpu()
@@ -144,9 +144,6 @@ def main(cfg: OmegaConf):
             log_loss_vs_uncertainty_measure(loss_img, entropy_img, title="Loss vs Shannon Entropy per image")
             log_loss_vs_uncertainty_measure(loss_img, gini_img, title="Loss vs Gini Index per image")
             log_loss_vs_uncertainty_measure(loss_img, attn_spread_img, title="Loss vs Attention Spread per image")
-
-
-
 
 if __name__ == "__main__":
     main()
