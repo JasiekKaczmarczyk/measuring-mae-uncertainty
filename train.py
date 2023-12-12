@@ -16,8 +16,6 @@ from attention_model import AttentionModel
 from dataset import MAEDataset
 from torch.nn import functional as F
 
-wandb.login(key="31cc84f0f137db6ccb18d10e16fd9af340a779a2")
-
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
         os.makedirs(dir)
@@ -29,8 +27,8 @@ def preprocess_dataset(
     *,
     overfit_single_batch: bool = False,
 ):
-    # hf_token = os.environ["HUGGINGFACE_TOKEN"]
-    hf_token = "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"
+    hf_token = os.environ["HUGGINGFACE_TOKEN"]
+    # hf_token = "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"
 
     train_ds = load_dataset(dataset_name, split="train", use_auth_token=hf_token)
     val_ds = load_dataset(dataset_name, split="test", use_auth_token=hf_token)
@@ -90,7 +88,7 @@ def main(cfg: OmegaConf):
         overfit_single_batch=cfg.parameters.overfit_single_batch,
     )
 
-    loss_predictor = AttentionModel(num_patches = 196)
+    loss_predictor = AttentionModel(num_patches = 197).to(cfg.parameters.device)
     optimizer = optim.Adam(loss_predictor.parameters(), lr=cfg.parameters.learning_rate)
 
     for epoch in range(cfg.parameters.epochs):
@@ -113,20 +111,20 @@ def main(cfg: OmegaConf):
 
             # get last attention map
             last_attn_map = decoder_outputs.attentions[-1].detach().mean(dim=1)
-            predicted_mae_loss = loss_predictor(last_attn_map)
+            predicted_mae_loss = loss_predictor(last_attn_map)[:, 1:]
             
             # metrics
             patched_img = model.patchify(pixel_values)
             ground_truth_mae_loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach()
 
-            loss = F.mse_loss(ground_truth_mae_loss, predicted_mae_loss)
+            loss = F.mse_loss(ground_truth_mae_loss, predicted_mae_loss.squeeze(-1))
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             wandb.log({'loss': loss})
-            save_checkpoint(loss_predictor, optimizer, cfg, save_path = cfg.parameters.save_path)
+            save_checkpoint(loss_predictor, optimizer, cfg, save_path = f"{cfg.parameters.save_path}/{cfg.parameters.run_name}")
             
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ hydra:
 
 parameters:
   dataset_name: "cifar10" # huggingface dataset
-  batch_size: 128
+  batch_size: 64
   num_workers: 8
   device: "cuda"
   overfit_single_batch: False
