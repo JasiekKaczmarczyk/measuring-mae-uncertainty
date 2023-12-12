@@ -1,0 +1,13 @@
+hydra:
+  job:
+    chdir: False
+
+parameters:
+  dataset_name: "cifar10" # huggingface dataset
+  batch_size: 256
+  num_workers: 8
+  device: "cuda"
+  overfit_single_batch: True
+  log_dir: "logs"
+  run_name: mae-uncertainty-${now:%Y-%m-%d-%H-%M}
+  

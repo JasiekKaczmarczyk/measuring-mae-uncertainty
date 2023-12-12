@@ -14,6 +14,8 @@ from tqdm import tqdm
 from dataset import MAEDataset
 from metrics import mae_loss, shannon_entropy, gini_index, attention_spread
 
+wandb.login(key="31cc84f0f137db6ccb18d10e16fd9af340a779a2")
+
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
         os.makedirs(dir)
@@ -47,7 +49,8 @@ def preprocess_dataset(
     *,
     overfit_single_batch: bool = False,
 ):
-    hf_token = os.environ["HUGGINGFACE_TOKEN"]
+    # hf_token = os.environ["HUGGINGFACE_TOKEN"]
+    hf_token = "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"
 
     train_ds = load_dataset(dataset_name, split="train", use_auth_token=hf_token)
     val_ds = load_dataset(dataset_name, split="test", use_auth_token=hf_token)

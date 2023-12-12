@@ -1,0 +1,9 @@
+hydra-core
+matplotlib
+seaborn
+transformers
+wandb
+datasets
+omegaconf
+tqdm
+einops
