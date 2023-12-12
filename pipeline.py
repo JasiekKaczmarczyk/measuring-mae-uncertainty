@@ -10,9 +10,11 @@ from torch.utils.data import DataLoader, Subset
 from datasets import load_dataset
 from omegaconf import OmegaConf
 from tqdm import tqdm
+import torchmetrics.functional as M
 
 from dataset import MAEDataset
 from metrics import mae_loss, shannon_entropy, gini_index, attention_spread
+from rollout import rollout
 
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
@@ -69,13 +71,14 @@ def preprocess_dataset(
 
     return train_dataloader, val_dataloader
 
-def log_loss_vs_uncertainty_measure(loss: torch.Tensor, measure: torch.Tensor, title: str):
-    loss = torch.flatten(loss)
-    measure = torch.flatten(measure)
+def create_wandb_table(measures: dict[torch.Tensor]):
+    data = [x for x in zip(*measures.values())]
+    table = wandb.Table(data=data, columns=list(measures.keys()))
 
-    data = [[x, y] for (x, y) in zip(loss, measure)]
-    table = wandb.Table(data=data, columns = ["x", "y"])
-    wandb.log({title : wandb.plot.scatter(table, "x", "y", title=title)})
+    return table
+
+def log_loss_vs_uncertainty_measure(table: wandb.Table, measure: str, title: str):
+    wandb.log({title : wandb.plot.scatter(table, "loss", measure, title=title)})
 
 
 @hydra.main(config_path="configs", config_name="config-default", version_base="1.3.2")
@@ -123,6 +126,9 @@ def main(cfg: OmegaConf):
             last_attn_map = decoder_outputs.attentions[-1].detach()
             last_attn_map = remove_cls_token(last_attn_map)
 
+            # get rollout attention map
+            # rollout_attn_map = rollout(decoder_outputs.attentions)
+
             # metrics
             patched_img = model.patchify(pixel_values)
             loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach().cpu()
@@ -131,19 +137,31 @@ def main(cfg: OmegaConf):
             gini = gini_index(last_attn_map).cpu()
             attn_spread = attention_spread(last_attn_map).cpu()
 
+            entropy = shannon_entropy(last_attn_map).cpu()
+            gini = gini_index(last_attn_map).cpu()
+            attn_spread = attention_spread(last_attn_map).cpu()
+
+            measures_per_patch = {
+                "loss": loss[mask],
+                "shannon_entropy_last": entropy[mask],
+                "gini_index_last": gini[mask],
+                "attention_spread_last": attn_spread[mask],
+            }
+            table = create_wandb_table(measures_per_patch)
+
             # log metrics per patch
-            log_loss_vs_uncertainty_measure(loss[mask_bool], entropy[mask_bool], title="Loss vs Shannon Entropy per patch")
-            log_loss_vs_uncertainty_measure(loss[mask_bool], gini[mask_bool], title="Loss vs Gini Index per patch")
-            log_loss_vs_uncertainty_measure(loss[mask_bool], attn_spread[mask_bool], title="Loss vs Attention Spread per patch")
+            # log_loss_vs_uncertainty_measure(loss[mask_bool], entropy[mask_bool], title="Loss vs Shannon Entropy per patch")
+            # log_loss_vs_uncertainty_measure(loss[mask_bool], gini[mask_bool], title="Loss vs Gini Index per patch")
+            # log_loss_vs_uncertainty_measure(loss[mask_bool], attn_spread[mask_bool], title="Loss vs Attention Spread per patch")
 
             loss_img = (loss * mask).sum(dim=-1) / mask.sum(dim=-1)
             entropy_img = (entropy * mask).sum(dim=-1) / mask.sum(dim=-1)
             gini_img = (gini * mask).sum(dim=-1) / mask.sum(dim=-1)
             attn_spread_img = (attn_spread * mask).sum(dim=-1) / mask.sum(dim=-1)
 
-            log_loss_vs_uncertainty_measure(loss_img, entropy_img, title="Loss vs Shannon Entropy per image")
-            log_loss_vs_uncertainty_measure(loss_img, gini_img, title="Loss vs Gini Index per image")
-            log_loss_vs_uncertainty_measure(loss_img, attn_spread_img, title="Loss vs Attention Spread per image")
+            # log_loss_vs_uncertainty_measure(loss_img, entropy_img, title="Loss vs Shannon Entropy per image")
+            # log_loss_vs_uncertainty_measure(loss_img, gini_img, title="Loss vs Gini Index per image")
+            # log_loss_vs_uncertainty_measure(loss_img, attn_spread_img, title="Loss vs Attention Spread per image")
 
 if __name__ == "__main__":
     main()
