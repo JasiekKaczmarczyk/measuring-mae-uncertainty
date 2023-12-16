@@ -13,7 +13,7 @@ from tqdm import tqdm
 import torchmetrics.functional as M
 
 from dataset import MAEDataset
-from metrics import mae_loss, shannon_entropy, gini_index, attention_spread
+from metrics import mae_loss, shannon_entropy, gini_index, attention_spread, maximum_attention_weight, KL_divergence, attention_focus_score
 from rollout import rollout
 
 def makedir_if_not_exists(dir: str):
@@ -170,33 +170,52 @@ def main(cfg: OmegaConf):
             entropy = shannon_entropy(attn_map).cpu()
             gini = gini_index(attn_map).cpu()
 
+            max_attention = maximum_attention_weight(attn_map).cpu()
+            kl_div = KL_divergence(attn_map).cpu()
+            focus_score = attention_focus_score(attn_map).cpu()
+
             nl_entropy = -torch.log(entropy)
             nl_gini = -torch.log(gini)
+            nl_kl_div= -torch.log(kl_div)
 
             loss_img = (loss * mask).sum(dim=-1) / mask.sum(dim=-1)
             entropy_img = (entropy * mask).sum(dim=-1) / mask.sum(dim=-1)
             gini_img = (gini * mask).sum(dim=-1) / mask.sum(dim=-1)
             # attn_spread_img = (attn_spread * mask).sum(dim=-1) / mask.sum(dim=-1)
+            max_attention_img = (max_attention * mask).sum(dim=-1) / mask.sum(dim=-1)
+            kl_div_img = (kl_div * mask).sum(dim=-1) / mask.sum(dim=-1)
+            focus_score_img = (focus_score * mask).sum(dim=-1) / mask.sum(dim=-1)
 
             nl_entropy_img = -torch.log(entropy_img)
             nl_gini_img = -torch.log(gini_img)
+            nl_kl_div_img = -torch.log(kl_div_img)
 
             measures_per_patch = {
                 "loss": loss[mask_bool],
                 "shannon_entropy": entropy[mask_bool],
                 "gini_index": gini[mask_bool],
+                "maximum_attention_weight": max_attention[mask_bool],
+                "KL_divergence": kl_div[mask_bool],
+                "attention_focus_score":focus_score[mask_bool],
                 "neg_log_shannon_entropy": nl_entropy[mask_bool],
                 "neg_log_gini_index": nl_gini[mask_bool],
+                "neg_log_KL_divergence": nl_kl_div[mask_bool],
                 # "attention_spread": attn_spread[mask],
             }
             table_per_patch = create_wandb_table(measures_per_patch)
+
+
 
             measures_per_img = {
                 "loss": loss_img,
                 "shannon_entropy": entropy_img,
                 "gini_index": gini_img,
+                "maximum_attention_weight": max_attention_img,
+                "KL_divergence": kl_div_img,
+                "attention_focus_score":focus_score_img,
                 "neg_log_shannon_entropy": nl_entropy_img,
                 "neg_log_gini_index": nl_gini_img,
+                "neg_log_KL_divergence": nl_kl_div_img
                 # "attention_spread": attn_spread_img,
             }
             table_per_img = create_wandb_table(measures_per_img)
@@ -207,6 +226,11 @@ def main(cfg: OmegaConf):
             log_loss_vs_uncertainty_measure(table_per_patch, "loss", "neg_log_shannon_entropy", title="Loss vs -log(Shannon Entropy) per patch")
             log_loss_vs_uncertainty_measure(table_per_patch, "loss", "neg_log_gini_index", title="Loss vs -log(Gini Index) per patch")
             # log_loss_vs_uncertainty_measure(table_per_patch, "loss", "attention_spread", title="Loss vs Attention Spread per patch")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "maximum_attention_weight", title="Loss vs maximum_attention_weight per patch")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "KL_divergence", title="Loss vs KL_divergence per patch")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "neg_log_KL_divergence", title="Loss vs -log(KL_divergence per patch)")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "attention_focus_score", title="Loss vs attention_focus_score per patch")
+
 
             # log metrics per img
             log_loss_vs_uncertainty_measure(table_per_img, "loss", "shannon_entropy", title="Loss vs Shannon Entropy per img")
@@ -214,6 +238,11 @@ def main(cfg: OmegaConf):
             log_loss_vs_uncertainty_measure(table_per_img, "loss", "neg_log_shannon_entropy", title="Loss vs -log(Shannon Entropy) per img")
             log_loss_vs_uncertainty_measure(table_per_img, "loss", "neg_log_gini_index", title="Loss vs -log(Gini Index) per img")
             # log_loss_vs_uncertainty_measure(table_per_img, "loss", "attention_spread", title="Loss vs Attention Spread per img")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "maximum_attention_weight", title="Loss vs maximum_attention_weight per img")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "KL_divergence", title="Loss vs KL_divergence per img")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "neg_log_KL_divergence", title="Loss vs -log(KL_divergence per patch)")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "attention_focus_score", title="Loss vs attention_focus_score per img")
+
 
 if __name__ == "__main__":
     main()
