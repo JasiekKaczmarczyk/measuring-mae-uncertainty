@@ -40,7 +40,7 @@ def plot_loss_vs_uncertainty_measure(loss: torch.Tensor, measure: torch.Tensor):
 
 def remove_cls_token(attention: torch.Tensor):
     # shape: [batch_size, num_heads, cls_token+seq_len, cls_token+seq_len] -> [batch_size, num_heads, seq_len, seq_len]
-    return attention[:, :, 1:, 1:]
+    return attention[:, 1:, 1:]
 
 def preprocess_dataset(
     dataset_name: str,
@@ -67,7 +67,7 @@ def preprocess_dataset(
 
     # dataloaders
     train_dataloader = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-    val_dataloader = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers)
+    val_dataloader = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers, shuffle=False)
 
     return train_dataloader, val_dataloader
 
@@ -96,15 +96,15 @@ def aggregate_attention_maps(attentions: list[torch.Tensor], aggregation_type: s
     # shape [batch_size, num_heads, seq_len, seq_len] x num_attention_blocks
     if aggregation_type == "last":
         attn = attentions[-1].detach()
-        attn = remove_cls_token(attn)
         attn = attention_head_fusion(attn, fusion_type=fusion_type)
+        attn = remove_cls_token(attn)
     elif aggregation_type == "mean":
         attn = torch.zeros_like(attentions[0])
         for attention in attentions:
             attn += attention
         attn = attn.detach() / len(attentions)
-        attn = remove_cls_token(attn)
         attn = attention_head_fusion(attn, fusion_type=fusion_type)
+        attn = remove_cls_token(attn)
     elif aggregation_type == "rollout":
         attn = rollout(attentions, head_fusion=fusion_type).detach()
         attn = remove_cls_token(attn)
@@ -123,7 +123,7 @@ def main(cfg: OmegaConf):
 
     wandb.init(
         project="mae-uncertainty",
-        name=cfg.parameters.run_name,
+        name=f"{cfg.parameters.run_name}-{cfg.parameters.attention_aggregation}-{cfg.parameters.attention_head_fusion_type}",
         dir=cfg.parameters.log_dir,
         config=OmegaConf.to_container(cfg, resolve=True),
     )
@@ -170,36 +170,49 @@ def main(cfg: OmegaConf):
             entropy = shannon_entropy(attn_map).cpu()
             gini = gini_index(attn_map).cpu()
 
-            measures_per_patch = {
-                "loss": loss[mask_bool],
-                "shannon_entropy": entropy[mask_bool],
-                "gini_index": gini[mask_bool],
-                # "attention_spread": attn_spread[mask],
-            }
-            table_per_patch = create_wandb_table(measures_per_patch)
+            nl_entropy = -torch.log(entropy)
+            nl_gini = -torch.log(gini)
 
             loss_img = (loss * mask).sum(dim=-1) / mask.sum(dim=-1)
             entropy_img = (entropy * mask).sum(dim=-1) / mask.sum(dim=-1)
             gini_img = (gini * mask).sum(dim=-1) / mask.sum(dim=-1)
             # attn_spread_img = (attn_spread * mask).sum(dim=-1) / mask.sum(dim=-1)
 
+            nl_entropy_img = -torch.log(entropy_img)
+            nl_gini_img = -torch.log(gini_img)
+
+            measures_per_patch = {
+                "loss": loss[mask_bool],
+                "shannon_entropy": entropy[mask_bool],
+                "gini_index": gini[mask_bool],
+                "neg_log_shannon_entropy": nl_entropy[mask_bool],
+                "neg_log_gini_index": nl_gini[mask_bool],
+                # "attention_spread": attn_spread[mask],
+            }
+            table_per_patch = create_wandb_table(measures_per_patch)
+
             measures_per_img = {
                 "loss": loss_img,
                 "shannon_entropy": entropy_img,
                 "gini_index": gini_img,
+                "neg_log_shannon_entropy": nl_entropy_img,
+                "neg_log_gini_index": nl_gini_img,
                 # "attention_spread": attn_spread_img,
             }
-
             table_per_img = create_wandb_table(measures_per_img)
 
             # log metrics per patch
             log_loss_vs_uncertainty_measure(table_per_patch, "loss", "shannon_entropy", title="Loss vs Shannon Entropy per patch")
             log_loss_vs_uncertainty_measure(table_per_patch, "loss", "gini_index", title="Loss vs Gini Index per patch")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "neg_log_shannon_entropy", title="Loss vs -log(Shannon Entropy) per patch")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "neg_log_gini_index", title="Loss vs -log(Gini Index) per patch")
             # log_loss_vs_uncertainty_measure(table_per_patch, "loss", "attention_spread", title="Loss vs Attention Spread per patch")
 
             # log metrics per img
             log_loss_vs_uncertainty_measure(table_per_img, "loss", "shannon_entropy", title="Loss vs Shannon Entropy per img")
             log_loss_vs_uncertainty_measure(table_per_img, "loss", "gini_index", title="Loss vs Gini Index per img")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "neg_log_shannon_entropy", title="Loss vs -log(Shannon Entropy) per img")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "neg_log_gini_index", title="Loss vs -log(Gini Index) per img")
             # log_loss_vs_uncertainty_measure(table_per_img, "loss", "attention_spread", title="Loss vs Attention Spread per img")
 
 if __name__ == "__main__":

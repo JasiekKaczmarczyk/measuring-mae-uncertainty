@@ -5,7 +5,7 @@ def rollout(attentions: list[torch.Tensor], head_fusion: str = "mean"):
     num_patches = attentions[0].size(-1)
 
     # shape: [num_patches, num_patches]
-    result = torch.eye(num_patches)
+    result = torch.eye(num_patches, device=attentions[0].device)
     with torch.no_grad():
         for attention in attentions:
             # shape: [batch_size, num_patches, num_patches]
@@ -18,9 +18,9 @@ def rollout(attentions: list[torch.Tensor], head_fusion: str = "mean"):
             else:
                 raise "Attention head fusion type Not supported"
 
-            I = torch.eye(num_patches)
+            I = torch.eye(num_patches, device=attention.device)
             a = (attention_heads_fused + 1.0 * I) / 2
-            a = a / a.sum(dim=-1)
+            a = a / a.sum(dim=-1, keepdim=True)
 
             result = a @ result
     
