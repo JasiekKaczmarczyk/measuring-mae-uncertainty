@@ -12,7 +12,7 @@ from datasets import load_dataset
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from metrics import mae_loss
-from attention_model import AttentionModel
+from loss_predictor import LossPredictor
 from dataset import MAEDataset
 from torch.nn import functional as F
 
@@ -50,7 +50,7 @@ def preprocess_dataset(
 
     return train_dataloader, val_dataloader
 
-def save_checkpoint(model: AttentionModel, optimizer: optim.Optimizer, cfg: OmegaConf, save_path: str):
+def save_checkpoint(model: LossPredictor, optimizer: optim.Optimizer, cfg: OmegaConf, save_path: str):
     # saving models
     torch.save(
         {
@@ -88,8 +88,10 @@ def main(cfg: OmegaConf):
         overfit_single_batch=cfg.parameters.overfit_single_batch,
     )
 
-    loss_predictor = AttentionModel(num_patches = 197).to(cfg.parameters.device)
+    loss_predictor = LossPredictor(num_patches = 197).to(cfg.parameters.device)
     optimizer = optim.Adam(loss_predictor.parameters(), lr=cfg.parameters.learning_rate)
+
+    step = 0
 
     for epoch in range(cfg.parameters.epochs):
         for x in tqdm(train_dataloader, total=len(train_dataloader), leave=False):
