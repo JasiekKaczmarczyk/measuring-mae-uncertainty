@@ -105,7 +105,7 @@ def main(cfg: OmegaConf):
 
             latent = outputs.last_hidden_state
             ids_restore = outputs.ids_restore
-            # mask = outputs.mask.cpu()
+            mask = outputs.mask
             # mask_bool = mask.to(torch.bool)
 
             decoder_outputs = model.decoder(latent, ids_restore, output_attentions=True)
@@ -119,7 +119,7 @@ def main(cfg: OmegaConf):
             patched_img = model.patchify(pixel_values)
             ground_truth_mae_loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach()
 
-            loss = F.mse_loss(ground_truth_mae_loss, predicted_mae_loss.squeeze(-1))
+            loss = F.mse_loss(ground_truth_mae_loss[mask], predicted_mae_loss.squeeze(-1)[mask])
 
             optimizer.zero_grad()
             loss.backward()

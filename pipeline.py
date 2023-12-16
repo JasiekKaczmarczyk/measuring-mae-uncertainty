@@ -16,8 +16,6 @@ from dataset import MAEDataset
 from metrics import mae_loss, shannon_entropy, gini_index, attention_spread
 from rollout import rollout
 
-wandb.login(key="31cc84f0f137db6ccb18d10e16fd9af340a779a2")
-
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
         os.makedirs(dir)
@@ -51,8 +49,7 @@ def preprocess_dataset(
     *,
     overfit_single_batch: bool = False,
 ):
-    # hf_token = os.environ["HUGGINGFACE_TOKEN"]
-    hf_token = "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"
+    hf_token = os.environ["HUGGINGFACE_TOKEN"]
 
     train_ds = load_dataset(dataset_name, split="train", use_auth_token=hf_token)
     val_ds = load_dataset(dataset_name, split="test", use_auth_token=hf_token)
@@ -74,17 +71,51 @@ def preprocess_dataset(
 
     return train_dataloader, val_dataloader
 
-def create_wandb_table(measures: dict[torch.Tensor]):
+def create_wandb_table(measures: dict):
     data = [x for x in zip(*measures.values())]
     table = wandb.Table(data=data, columns=list(measures.keys()))
 
     return table
 
-def log_loss_vs_uncertainty_measure(table: wandb.Table, measure: str, title: str):
-    wandb.log({title : wandb.plot.scatter(table, "loss", measure, title=title)})
+def log_loss_vs_uncertainty_measure(table: wandb.Table, loss: str, measure: str, title: str):
+    wandb.log({title : wandb.plot.scatter(table, loss, measure, title=title)})
 
 
-@hydra.main(config_path="configs", config_name="config-default", version_base="1.3.2")
+def attention_head_fusion(attention_map: torch.Tensor, fusion_type: str = "mean"):
+    # shape [batch_size, num_heads, seq_len, seq_len]
+    if fusion_type == "mean":
+        return attention_map.mean(dim=1)
+    elif fusion_type == "min":
+        return attention_map.amin(dim=1)
+    elif fusion_type == "max":
+        return attention_map.amax(dim=1)
+    else:
+        raise NotImplementedError()
+    
+def aggregate_attention_maps(attentions: list[torch.Tensor], aggregation_type: str = "last", fusion_type: str = "mean"):
+    # shape [batch_size, num_heads, seq_len, seq_len] x num_attention_blocks
+    if aggregation_type == "last":
+        attn = attentions[-1].detach()
+        attn = remove_cls_token(attn)
+        attn = attention_head_fusion(attn, fusion_type=fusion_type)
+    elif aggregation_type == "mean":
+        attn = torch.zeros_like(attentions[0])
+        for attention in attentions:
+            attn += attention
+        attn = attn.detach() / len(attentions)
+        attn = remove_cls_token(attn)
+        attn = attention_head_fusion(attn, fusion_type=fusion_type)
+    elif aggregation_type == "rollout":
+        attn = rollout(attentions, head_fusion=fusion_type).detach()
+        attn = remove_cls_token(attn)
+    else:
+        raise NotImplementedError()
+    
+    # returns shape: [batch_size, seq_len, seq_len]
+    return attn
+
+
+@hydra.main(config_path="configs", config_name="config-pipeline", version_base="1.3.2")
 def main(cfg: OmegaConf):
     makedir_if_not_exists(cfg.parameters.log_dir)
 
@@ -125,46 +156,51 @@ def main(cfg: OmegaConf):
             decoder_outputs = model.decoder(latent, ids_restore, output_attentions=True)
             logits = decoder_outputs.logits
 
-            # get last attention map
-            last_attn_map = decoder_outputs.attentions[-1].detach()
-            last_attn_map = remove_cls_token(last_attn_map)
-
-            # get rollout attention map
-            # rollout_attn_map = rollout(decoder_outputs.attentions)
+            # get last attention map, shape: [batch_size, num_heads, seq_len, seq_len]
+            attn_map = aggregate_attention_maps(
+                decoder_outputs.attentions,
+                aggregation_type=cfg.parameters.attention_aggregation,
+                fusion_type=cfg.parameters.attention_head_fusion_type,
+            )
 
             # metrics
             patched_img = model.patchify(pixel_values)
             loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach().cpu()
 
-            entropy = shannon_entropy(last_attn_map).cpu()
-            gini = gini_index(last_attn_map).cpu()
-            attn_spread = attention_spread(last_attn_map).cpu()
-
-            entropy = shannon_entropy(last_attn_map).cpu()
-            gini = gini_index(last_attn_map).cpu()
-            attn_spread = attention_spread(last_attn_map).cpu()
+            entropy = shannon_entropy(attn_map).cpu()
+            gini = gini_index(attn_map).cpu()
 
             measures_per_patch = {
-                "loss": loss[mask],
-                "shannon_entropy_last": entropy[mask],
-                "gini_index_last": gini[mask],
-                "attention_spread_last": attn_spread[mask],
+                "loss": loss[mask_bool],
+                "shannon_entropy": entropy[mask_bool],
+                "gini_index": gini[mask_bool],
+                # "attention_spread": attn_spread[mask],
             }
-            table = create_wandb_table(measures_per_patch)
-
-            # log metrics per patch
-            # log_loss_vs_uncertainty_measure(loss[mask_bool], entropy[mask_bool], title="Loss vs Shannon Entropy per patch")
-            # log_loss_vs_uncertainty_measure(loss[mask_bool], gini[mask_bool], title="Loss vs Gini Index per patch")
-            # log_loss_vs_uncertainty_measure(loss[mask_bool], attn_spread[mask_bool], title="Loss vs Attention Spread per patch")
+            table_per_patch = create_wandb_table(measures_per_patch)
 
             loss_img = (loss * mask).sum(dim=-1) / mask.sum(dim=-1)
             entropy_img = (entropy * mask).sum(dim=-1) / mask.sum(dim=-1)
             gini_img = (gini * mask).sum(dim=-1) / mask.sum(dim=-1)
-            attn_spread_img = (attn_spread * mask).sum(dim=-1) / mask.sum(dim=-1)
+            # attn_spread_img = (attn_spread * mask).sum(dim=-1) / mask.sum(dim=-1)
 
-            # log_loss_vs_uncertainty_measure(loss_img, entropy_img, title="Loss vs Shannon Entropy per image")
-            # log_loss_vs_uncertainty_measure(loss_img, gini_img, title="Loss vs Gini Index per image")
-            # log_loss_vs_uncertainty_measure(loss_img, attn_spread_img, title="Loss vs Attention Spread per image")
+            measures_per_img = {
+                "loss": loss_img,
+                "shannon_entropy": entropy_img,
+                "gini_index": gini_img,
+                # "attention_spread": attn_spread_img,
+            }
+
+            table_per_img = create_wandb_table(measures_per_img)
+
+            # log metrics per patch
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "shannon_entropy", title="Loss vs Shannon Entropy per patch")
+            log_loss_vs_uncertainty_measure(table_per_patch, "loss", "gini_index", title="Loss vs Gini Index per patch")
+            # log_loss_vs_uncertainty_measure(table_per_patch, "loss", "attention_spread", title="Loss vs Attention Spread per patch")
+
+            # log metrics per img
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "shannon_entropy", title="Loss vs Shannon Entropy per img")
+            log_loss_vs_uncertainty_measure(table_per_img, "loss", "gini_index", title="Loss vs Gini Index per img")
+            # log_loss_vs_uncertainty_measure(table_per_img, "loss", "attention_spread", title="Loss vs Attention Spread per img")
 
 if __name__ == "__main__":
     main()

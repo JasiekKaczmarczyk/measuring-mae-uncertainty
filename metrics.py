@@ -14,22 +14,22 @@ def mae_loss(pred: torch.Tensor, target: torch.Tensor, use_norm_pix_loss: bool =
     return loss
 
 def shannon_entropy(attn: torch.Tensor):
-    # attn shape: [batch_size, num_heads, seq_len, seq_len]
-    # base is num_heads
-    base = attn.shape[1]
-    # shape: [batch_size, num_heads, seq_len]
+    # attn shape: [batch_size, seq_len, seq_len]
+    # base is seq_len
+    base = attn.shape[-1]
+    # shape: [batch_size, seq_len]
     H = -torch.sum(attn * torch.log(attn), dim=-1) / math.log(base)
 
-    return torch.mean(H, dim=1)
+    return H
 
 def gini_index(attn: torch.Tensor):
-    # attn shape: [batch_size, num_heads, seq_len, seq_len]
+    # attn shape: [batch_size, seq_len, seq_len]
     G = 1 - torch.sum(attn ** 2, dim=-1)
 
-    return torch.mean(G, dim=1)
+    return G
 
 def batch_cov(attn: torch.Tensor):
-    # shape: [batch_size, num_heads, query_len, key_len]
+    # shape: [batch_size, query_len, key_len]
     B, H, Q, K = attn.shape
     attn = einops.rearrange(attn, "b h q k -> b q h k")
 
@@ -40,8 +40,6 @@ def batch_cov(attn: torch.Tensor):
 
     prods = torch.einsum("b q h k, b q j k -> b q h j", [diffs, diffs])
     bcov = prods / (K - 1)  # Unbiased estimate
-
-    # max_abs_value = torch.abs(torch.amax(bcov, dim=[-2, -1], keepdim=True))
 
     return bcov
 
