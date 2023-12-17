@@ -1,29 +1,38 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+class LinearBlock(nn.Module):
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+
+        self.block = nn.Sequential(
+            nn.Linear(in_features, out_features),
+            nn.ReLU()
+        )
+
+    def forward(self, x: torch.Tensor):
+        return self.block(x)
 
 class LossPredictor(nn.Module):
-    def __init__(self, num_patches: int, hidden_dim1: int = 512, hidden_dim2: int = 265):
+    def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(num_patches, hidden_dim1)  
-        self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)  
-        self.fc3 = nn.Linear(hidden_dim2, 1)  
+        # self.fc1 = nn.Linear(num_patches, hidden_dim1)  
+        # self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)  
+        # self.fc3 = nn.Linear(hidden_dim2, 1)
+
+        self.model = nn.Sequential(
+            LinearBlock(1, 256),
+            LinearBlock(256, 512),
+            LinearBlock(512, 256),
+            LinearBlock(256, 1),
+        )
 
     def forward(self, attention: torch.Tensor):
-        x = F.relu(self.fc1(attention))  #[batch_size, num_patches, num_patches]
-        x = F.relu(self.fc2(x)) 
-        output = self.fc3(x) 
-        return output
+        # [batch_size, query_len, key_len]
+        x = attention.unsqueeze(-1)
 
+        x = self.model(x)
 
-# # Przykładowe dane
-# batch_size = 20
-# num_heads = 4
-# num_patches = 5
-# attention = torch.rand(batch_size, num_patches, num_patches)  # Przykładowy tensor atencji
-# target = torch.rand(batch_size, 1)  # Przykładowy tensor target
+        aggregated_x = torch.mean(x, dim=2).squeeze(-1)
 
-# # Tworzenie modelu i obliczanie straty
-# model = AttentionModel(num_patches)
-# out = model(attention)
-# print(out.shape)
+        return aggregated_x

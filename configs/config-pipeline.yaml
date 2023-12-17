@@ -6,7 +6,7 @@ parameters:
   dataset_name: "cifar10" # huggingface dataset
   batch_size: 256
   num_workers: 8
-  attention_aggregation: "mean"
+  attention_aggregation: "rollout"
   attention_head_fusion_type: "min"
   device: "cuda"
   overfit_single_batch: True

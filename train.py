@@ -3,10 +3,9 @@ import hydra
 
 import torch
 import torch.optim as optim
-import matplotlib.pyplot as plt
-import seaborn as sns
-from transformers import AutoImageProcessor, ViTMAEForPreTraining
+import torchmetrics.functional as M
 import wandb
+from transformers import AutoImageProcessor, ViTMAEForPreTraining
 from torch.utils.data import DataLoader, Subset
 from datasets import load_dataset
 from omegaconf import OmegaConf
@@ -15,7 +14,7 @@ from metrics import mae_loss
 from loss_predictor import LossPredictor
 from dataset import MAEDataset
 from torch.nn import functional as F
-from utils import attention_head_fusion, aggregate_attention_maps
+from utils import aggregate_attention_maps
 
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
@@ -90,8 +89,10 @@ def main(cfg: OmegaConf):
         overfit_single_batch=cfg.parameters.overfit_single_batch,
     )
 
-    loss_predictor = LossPredictor(num_patches = 196).to(cfg.parameters.device)
+    loss_predictor = LossPredictor().to(cfg.parameters.device)
     optimizer = optim.Adam(loss_predictor.parameters(), lr=cfg.parameters.learning_rate)
+
+    step = 0
 
     for epoch in range(cfg.parameters.epochs):
         for x in tqdm(train_dataloader, total=len(train_dataloader), leave=False):
@@ -105,32 +106,35 @@ def main(cfg: OmegaConf):
 
             latent = outputs.last_hidden_state
             ids_restore = outputs.ids_restore
-            # mask = outputs.mask.cpu()
+            mask = outputs.mask
             # mask_bool = mask.to(torch.bool)
 
             decoder_outputs = model.decoder(latent, ids_restore, output_attentions=True)
             logits = decoder_outputs.logits
 
-            last_attn_map = aggregate_attention_maps(
+            attn_map = aggregate_attention_maps(
                 decoder_outputs.attentions,
                 aggregation_type=cfg.parameters.attention_aggregation,
                 fusion_type=cfg.parameters.attention_head_fusion_type,
             )
-            predicted_mae_loss = loss_predictor(last_attn_map)
             
-            # metrics
+            # loss
             patched_img = model.patchify(pixel_values)
-            ground_truth_mae_loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach()
+            ground_truth_mae_loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=True).detach() * mask
+            predicted_mae_loss = loss_predictor(attn_map) * mask
 
-            loss = F.mse_loss(ground_truth_mae_loss, predicted_mae_loss.squeeze(-1))
+            loss = F.mse_loss(predicted_mae_loss, ground_truth_mae_loss)
+            r2 = M.r2_score(predicted_mae_loss, ground_truth_mae_loss)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        if epoch % cfg.parameters.log_every_n_steps == 0:
-            wandb.log({'loss': loss})
-            save_checkpoint(loss_predictor, optimizer, cfg, save_path = f"{cfg.parameters.save_path}/{cfg.parameters.run_name}")
+            step += 1
+
+            if step % cfg.parameters.log_every_n_steps == 0:
+                wandb.log({'loss': loss, "r2": r2})
+                save_checkpoint(loss_predictor, optimizer, cfg, save_path = f"{cfg.parameters.save_path}/{cfg.parameters.run_name}")
             
 
 if __name__ == "__main__":
