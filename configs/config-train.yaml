@@ -4,12 +4,15 @@ hydra:
 
 parameters:
   dataset_name: "cifar10" # huggingface dataset
-  batch_size: 64
+  batch_size: 32
   num_workers: 8
   device: "cuda"
   overfit_single_batch: False
+  attention_aggregation: "rollout"
+  attention_head_fusion_type: "min"
   log_dir: "logs"
   run_name: mae-uncertainty-${now:%Y-%m-%d-%H-%M}
   learning_rate: 0.001
-  epochs: 10
+  epochs: 20
+  log_every_n_steps: 4
   save_path: "checkpoints"

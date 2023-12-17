@@ -15,6 +15,7 @@ from metrics import mae_loss
 from loss_predictor import LossPredictor
 from dataset import MAEDataset
 from torch.nn import functional as F
+from utils import attention_head_fusion, aggregate_attention_maps
 
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
@@ -27,8 +28,8 @@ def preprocess_dataset(
     *,
     overfit_single_batch: bool = False,
 ):
-    hf_token = os.environ["HUGGINGFACE_TOKEN"]
-    # hf_token = "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"
+
+    hf_token = "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"
 
     train_ds = load_dataset(dataset_name, split="train", use_auth_token=hf_token)
     val_ds = load_dataset(dataset_name, split="test", use_auth_token=hf_token)
@@ -68,11 +69,12 @@ def main(cfg: OmegaConf):
     makedir_if_not_exists(cfg.parameters.log_dir)
     makedir_if_not_exists(cfg.parameters.save_path)
 
+    # wandb.login(key="31cc84f0f137db6ccb18d10e16fd9af340a779a2")
     wandb.login()
 
     wandb.init(
         project="mae-uncertainty",
-        name=cfg.parameters.run_name,
+        name=f"{cfg.parameters.run_name}-{cfg.parameters.attention_aggregation}-{cfg.parameters.attention_head_fusion_type}",
         dir=cfg.parameters.log_dir,
         config=OmegaConf.to_container(cfg, resolve=True),
     )
@@ -88,10 +90,8 @@ def main(cfg: OmegaConf):
         overfit_single_batch=cfg.parameters.overfit_single_batch,
     )
 
-    loss_predictor = LossPredictor(num_patches = 197).to(cfg.parameters.device)
+    loss_predictor = LossPredictor(num_patches = 196).to(cfg.parameters.device)
     optimizer = optim.Adam(loss_predictor.parameters(), lr=cfg.parameters.learning_rate)
-
-    step = 0
 
     for epoch in range(cfg.parameters.epochs):
         for x in tqdm(train_dataloader, total=len(train_dataloader), leave=False):
@@ -105,26 +105,30 @@ def main(cfg: OmegaConf):
 
             latent = outputs.last_hidden_state
             ids_restore = outputs.ids_restore
-            mask = outputs.mask
+            # mask = outputs.mask.cpu()
             # mask_bool = mask.to(torch.bool)
 
             decoder_outputs = model.decoder(latent, ids_restore, output_attentions=True)
             logits = decoder_outputs.logits
 
-            # get last attention map
-            last_attn_map = decoder_outputs.attentions[-1].detach().mean(dim=1)
-            predicted_mae_loss = loss_predictor(last_attn_map)[:, 1:]
+            last_attn_map = aggregate_attention_maps(
+                decoder_outputs.attentions,
+                aggregation_type=cfg.parameters.attention_aggregation,
+                fusion_type=cfg.parameters.attention_head_fusion_type,
+            )
+            predicted_mae_loss = loss_predictor(last_attn_map)
             
             # metrics
             patched_img = model.patchify(pixel_values)
             ground_truth_mae_loss = mae_loss(pred=logits, target=patched_img, use_norm_pix_loss=False).detach()
 
-            loss = F.mse_loss(ground_truth_mae_loss[mask], predicted_mae_loss.squeeze(-1)[mask])
+            loss = F.mse_loss(ground_truth_mae_loss, predicted_mae_loss.squeeze(-1))
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
+        if epoch % cfg.parameters.log_every_n_steps == 0:
             wandb.log({'loss': loss})
             save_checkpoint(loss_predictor, optimizer, cfg, save_path = f"{cfg.parameters.save_path}/{cfg.parameters.run_name}")
             
