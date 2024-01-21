@@ -59,14 +59,13 @@ def attention_spread(attn: torch.Tensor):
 def attention_focus_score(attn: torch.Tensor):
     
     return 1/torch.sum(attn**2, dim=-1)
-
 def KL_divergence(attn: torch.Tensor):
     kl_loss = torch.nn.KLDivLoss(reduction="batchmean", log_target=True)
 
-    uniform = torch.nn.functional.log_softmax(torch.randn(attn.shape, requires_grad=True), dim=-1)
+    uniform = torch.nn.functional.log_softmax(torch.ones_like(attn) / attn.shape[-1], dim=-1)
     attn = torch.nn.functional.log_softmax(attn, dim=1)
 
-    kl_divs = torch.zeros(attn.shape[0], attn.shape[1])
+    kl_divs = torch.zeros(attn.shape[0], attn.shape[1], device=attn.device)
 
     for i in range(attn.shape[0]):
         for j in range(attn.shape[1]):
